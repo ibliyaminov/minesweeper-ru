@@ -1,0 +1,386 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+	<title>Сапёр</title>
+	<style type="text/css">
+		:root{
+			--dark-grey-color: rgb(29, 34, 39);
+			--grey-color: rgb(74, 79, 85);
+			--light-grey-color: rgb(235, 235, 232);
+			--white-color: rgb(255, 255, 252);
+			--orange-color: rgb(249, 174, 88);
+			--red-color: rgb(236, 96, 102);
+		}
+		body{
+			background-color: var(--dark-grey-color);
+			padding: auto;
+		}
+		#title{
+			color: var(--white-color);
+			font-size: xx-large;
+			font-family: "Trebuchet MS";
+			display: block;
+			text-align: center;
+		}
+		#settings, #stat, #gameover{
+			display: table;
+			max-width: 100%;
+			margin: 15px auto;
+			color: var(--white-color);
+			font-family: sans-serif;
+			font-size: larger;
+		}
+		#settings input, #gameover input{
+			background-color: var(--white-color);
+			color: var(--dark-grey-color);
+			padding: 2px 5px;
+			border-radius: 5px;
+			width: -moz-available;
+			width: -webkit-fill-available;
+			font-family: sans-serif;
+			font-size: 1em;
+		}
+		#stat{
+			display: none;
+		}
+		#gameover{
+			display: none;
+		}
+		#field{
+			max-width: 100%;
+			max-height: 100%;
+			margin: 15px auto;
+			display: none;
+			border-radius: 12px;
+			border: 2px solid var(--white-color);
+		}
+		#field table{
+			border-spacing: 1px;
+		}
+		#field div{
+			width: 35px;
+			height: 35px;
+			text-align: center;
+			font-family: Arial, Helvetica, sans-serif;
+			font-size: 25px;
+			border: 0;
+			border-radius: 8px;
+		}
+		.btn_unclicked{
+			color: rgba(0, 0, 0, 0);
+			background-color: var(--light-grey-color);
+		}
+		.btn_clicked{
+			background-color: var(--grey-color);
+		}
+		.btn_empty::before{
+			color: rgba(0, 0, 0, 0);
+			content: "0";
+		}
+		.btn_numbered{
+			color: var(--white-color);
+		}
+		.btn_numbered::before{
+			font-weight: bold;
+			vertical-align: middle;
+			content: attr(data-number);
+		}
+		.btn_flagged{
+			color: var(--dark-grey-color);
+			background-color: var(--orange-color);
+		}
+		.btn_flagged::before{
+			vertical-align: middle;
+			content: "\1F6A9";
+		}
+		.btn_bomb{
+			background-color: var(--red-color);
+			padding: unset;
+		}
+		.btn_bomb::before{
+			color: var(--dark-grey-color);
+			vertical-align: middle;
+			content: "\1F4A3";
+		}
+		.btn_wrong_flag{
+			background-color: var(--light-grey-color);
+			padding: unset;
+		}
+		.btn_wrong_flag::before{
+			color: var(--red-color);
+			vertical-align: middle;
+			content: "\274C";
+		}
+	</style>
+</head>
+<body>
+<span id="title">Сапёр</span>
+<div id="settings">
+	<table id="settings_table">
+		<tr><td>Ширина поля</td><td><input type="number" id="settings_width" min="10" max="50" placeholder="Ширина" onchange="settings_mines_count_update()" value="30"/></td></tr>
+		<tr><td>Высота поля</td><td><input type="number" id="settings_height" min="10" max="50" placeholder="Высота" onchange="settings_mines_count_update()" value="20"/></td></tr>
+		<tr><td>Количество мин</td><td><input type="number" id="settings_mines_count" min="1" placeholder="Мин" value="120"/></td></tr>
+	</table>
+	<input type="submit" onclick="create_field(Math.floor(document.getElementById('settings_width').value), Math.floor(document.getElementById('settings_height').value), Math.floor(document.getElementById('settings_mines_count').value))" id="settings_submit" value="Начать игру"/>
+</div>
+<div id="field">
+</div>
+<div id="stat">
+	Нераскрытых клеток: <span id="stat_btns_count">0</span><br/>
+	Установлено флагов: <span id="stat_flags_count">0</span><br/>
+	Мин: <span id="stat_mines_count">0</span>
+</div>
+<div id="gameover">
+	<span id="gameover_message"></span><br/>
+	<input type="submit" onclick="reload_game()" value="Новая игра"/>
+</div>
+<script>
+	var width, height, mines_count, unclicked_btns, flags_count, is_started, is_game_over = false, field_matrix, field_buttons;
+
+	/*
+		width — ширина поля
+		height — высота поля
+		mines_count — количество мин
+		unclicked_btn — счётчик нераскрытых клеток
+		flags_count — счётчик установленных флагов
+		is_started — булева переменная, нужна для запуска игры
+		is_game_over — булева переменная, нужна для блокировки кнопок после окончания игры
+		field_matrix — двумерный массив кодов кнопок на поле:
+			0 — пустая неоткрытая клетка
+			1 — неоткрытая клетка, под которой находится цифра 1
+			...
+			9 — неоткрытая клетка, под которой находится мина
+			10 — открытая пустая клетка
+			11 — открытая клетка с цифрой 1
+			...
+			19 — открытая клетка с миной (на деле не используется)
+			20 — пустая клетка, помеченная флажком
+			21 — помеченная флажком клетка, под которой находится цифра 1
+			...
+			29 — помеченная флажком клетка, под которой находится мина
+		field_buttons — двумерный массив HTML-объектов конопок поля для упрощённого доступа к ним
+	*/
+
+	function settings_mines_count_update(){
+		document.getElementById("settings_mines_count").value = Math.floor(document.getElementById("settings_width").value * document.getElementById("settings_height").value / 5);
+	}
+
+	function reload_game(){
+		is_game_over = false;
+		is_started = false;
+		document.getElementById("settings").style.display = "table";
+		document.getElementById("field").style.display = "none";
+		document.getElementById("gameover").style.display = "none";
+	}
+
+	function create_field(w, h, m){
+		width = w;
+		height = h;
+		mines_count = m;
+		if(width < 1 || height < 1){
+			alert("Ошибка! Недопустимые размеры поля");
+			return;
+		}
+		if(mines_count > width * height - 1 || mines_count < 1){
+			alert("Ошибка! Недопустимое количество мин");
+			return;
+		}
+		unclicked_btns = width * height;
+		flags_count = 0;
+		is_started = false;
+		field_matrix = [];
+		for(let i = 0; i < height; i++){
+			field_matrix.push([]);
+			for(let j = 0; j < width; j++){
+				field_matrix[i].push(0);
+			}
+		}
+		let table, tr, td, button;
+		document.getElementById("field").innerHTML = "";
+		document.getElementById("field").style.display = "table";
+		table = document.createElement("table");
+		table.oncontextmenu = function(){return false};
+		table.id = "field_table";
+		document.getElementById("settings").style.display = "none";
+		field_buttons = [];
+		for(let i = 0; i < height; i++){
+			tr = document.createElement("tr");
+			field_buttons.push([]);
+			for(let j = 0; j < width; j++){
+				td = document.createElement("td");
+				button = document.createElement("div");
+				button.onmouseup = function(){field_btn_click(event, this)};
+				button.className = "btn_unclicked";
+				button.dataset.x = i;
+				button.dataset.y = j;
+				td.append(button);
+				tr.append(td);
+				field_buttons[i].push(button);
+			}
+			table.append(tr);
+		}
+		document.getElementById("field").append(table);
+		document.getElementById("stat").style.display = "table";
+		document.getElementById("stat_btns_count").innerHTML = unclicked_btns;
+		document.getElementById("stat_flags_count").innerHTML = flags_count;
+		document.getElementById("stat_mines_count").innerHTML = mines_count;
+
+	}
+
+	function start_game(x, y){
+		if(mines_count > width * height - 1){
+			return false;
+		}
+		is_started = true;
+		let mines_i = mines_count;
+		while(mines_i > 0){
+			let xx = Math.floor(Math.random() * height);
+			let yy = Math.floor(Math.random() * width);
+			if(xx == x && yy == y){
+				continue;
+			}
+			if(field_matrix[xx][yy] == 9){
+				continue;
+			}
+			field_matrix[xx][yy] = 9;
+			let eight_btns = [
+				[xx - 1, yy - 1], [xx - 1, yy], [xx - 1, yy + 1],
+				[xx, yy - 1], [xx, yy + 1],
+				[xx + 1, yy - 1], [xx + 1, yy], [xx + 1, yy + 1]];
+			for(let i = 0; i < eight_btns.length; i++){
+				let xxx = eight_btns[i][0];
+				let yyy = eight_btns[i][1];
+				if(xxx >= 0 && xxx < height && yyy >= 0 && yyy < width){
+					if(field_matrix[xxx][yyy] < 9){
+					    field_matrix[xxx][yyy]++;
+					}
+				}
+			}
+			mines_i--;
+		}
+		return true;
+	}
+
+	function field_btn_click(event, button){
+		if(is_game_over){
+			return;
+		}
+		if(event.button == 0 && event.buttons == 0){
+			left_btn_click(button);
+		}else if(event.button == 2 && event.buttons == 0){
+			right_btn_click(button);
+		}else if(event.button == 0 && event.buttons == 2){
+			left_right_btn_click(button);
+		}
+	}
+
+	function left_btn_click(button){
+		let x = Number(button.dataset.x);
+		let y = Number(button.dataset.y);
+		if(field_matrix[x][y] >= 10){
+			return;
+		}
+		if(!is_started){
+			if(!start_game(x, y)){
+				return;
+			}
+		}
+		if(field_matrix[x][y] == 9){
+			game_over(false);
+			return;
+		}else if(field_matrix[x][y] == 0){
+			button.className = "btn_clicked btn_empty";
+			field_matrix[x][y] = 10;
+			let eight_btns = [
+				[x - 1, y - 1], [x - 1, y], [x - 1, y + 1],
+				[x, y - 1], [x, y + 1],
+				[x + 1, y - 1], [x + 1, y], [x + 1, y + 1]];
+			for(let i = 0; i < eight_btns.length; i++){
+				let xx = eight_btns[i][0];
+				let yy = eight_btns[i][1];
+				if(xx >= 0 && xx < height && yy >= 0 && yy < width){
+					if(field_matrix[xx][yy] >= 0 && field_matrix[xx][yy] < 9){
+						left_btn_click(field_buttons[xx][yy]);
+					}
+				}
+			}
+		}else if(field_matrix[x][y] < 9){
+			button.className = "btn_clicked btn_numbered";
+			button.dataset.number = field_matrix[x][y];
+			field_matrix[x][y] += 10;
+		}
+		unclicked_btns--;
+		document.getElementById("stat_btns_count").innerHTML = unclicked_btns;
+		if(unclicked_btns == mines_count){
+			game_over(true);
+		}
+	}
+	
+	function right_btn_click(button){
+		let x = Number(button.dataset.x);
+		let y = Number(button.dataset.y);
+		if(field_matrix[x][y] < 10){
+			flags_count++;
+			field_matrix[x][y] += 20;
+			button.className = "btn_flagged";
+		}else if(field_matrix[x][y] >= 20){
+			flags_count--;
+			field_matrix[x][y] -= 20;
+			button.className = "btn_unclicked";
+		}
+		document.getElementById("stat_flags_count").innerHTML = flags_count;
+	}
+
+	function left_right_btn_click(button){
+		let x = Number(button.dataset.x);
+		let y = Number(button.dataset.y);
+		if(field_matrix[x][y] > 10 && field_matrix[x][y] < 19){
+			let eight_btns = [
+				[x - 1, y - 1], [x - 1, y], [x - 1, y + 1],
+				[x, y - 1], [x, y + 1],
+				[x + 1, y - 1], [x + 1, y], [x + 1, y + 1]];
+			let flags_around = 0;
+			for(let i = 0; i < eight_btns.length; i++){
+				let xx = eight_btns[i][0];
+				let yy = eight_btns[i][1];
+				if(xx >= 0 && xx < height && yy >= 0 && yy < width){
+					if(field_matrix[xx][yy] >= 20){
+						flags_around++;
+					}
+				}
+			}
+			if(flags_around < field_matrix[x][y] - 10){
+				return;
+			}
+			for(let i = 0; i < eight_btns.length; i++){
+				let xx = eight_btns[i][0];
+				let yy = eight_btns[i][1];
+				if(xx >= 0 && xx < height && yy >= 0 && yy < width){
+					left_btn_click(field_buttons[xx][yy]);
+				}
+			}
+		}
+	}
+
+	function game_over(win){
+		is_game_over = true;
+		if(win){
+			document.getElementById("gameover_message").innerHTML = "Победа!";
+		}else{
+			for(let i = 0; i < height; i++){
+				for(let j = 0; j < width; j++){
+					if(field_matrix[i][j] == 9){
+						field_buttons[i][j].className = "btn_bomb";
+					}else if(field_matrix[i][j] >= 20 && field_matrix[i][j] < 29){
+						field_buttons[i][j].className = "btn_wrong_flag";						
+					}
+				}
+			}
+			document.getElementById("gameover_message").innerHTML = "Поражение!";
+		}
+		document.getElementById("stat").style.display = "none";
+		document.getElementById("gameover").style.display = "table";
+	}
+</script>
+</body>
+</html>
